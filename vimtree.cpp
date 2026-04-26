@@ -113,18 +113,25 @@ static void render_tree(const std::vector<Node*>& flat,
     getmaxyx(stdscr, h, w);
     erase();
 
-    std::string header = " " + root_name + "  [up/dn jk] move  [Enter/Space] expand/open  [n] new file  [N] new folder  [q] quit ";
+    std::string header = " " + root_name + "  [up/dn jk] move  [Enter/Space] expand/open  [n] new file  [N] new folder  [r] rename";
     header = trunc(header, w - 1);
     header = ljust(header, w - 1);
     attron(COLOR_PAIR(3) | A_BOLD);
     mvaddstr(0, 0, header.c_str());
     attroff(COLOR_PAIR(3) | A_BOLD);
 
-    int list_height = h - 2;
+    std::string header2 = "  [Del] delete  [q] quit ";
+    header2 = trunc(header2, w - 1);
+    header2 = ljust(header2, w - 1);
+    attron(COLOR_PAIR(3) | A_BOLD);
+    mvaddstr(1, 0, header2.c_str());
+    attroff(COLOR_PAIR(3) | A_BOLD);
+
+    int list_height = h - 3;
     int end = std::min(scroll + list_height, (int)flat.size());
 
     for (int i = scroll; i < end; ++i) {
-        int row      = i - scroll + 1;
+        int row      = i - scroll + 2;
         bool is_cur  = (i == cursor);
         Node* node   = flat[i];
 
@@ -252,6 +259,133 @@ static void refresh_tree(std::unique_ptr<Node>& root_owner, Node* root,
         scroll = cursor;
     else if (cursor >= scroll + list_height)
         scroll = cursor - list_height + 1;
+}
+
+static bool rename_item(Node* current_node, const std::string& new_name) {
+    if (new_name.empty()) return false;
+    
+    fs::path old_path = current_node->path;
+    fs::path parent_path = old_path.parent_path();
+    fs::path new_path = parent_path / new_name;
+    
+    try {
+        fs::rename(old_path, new_path);
+        return true;
+    } catch (const std::exception& e) {
+        return false;
+    }
+}
+
+static void refresh_tree_and_select(std::unique_ptr<Node>& root_owner, Node* root, 
+                                     int& cursor, int& scroll, const std::string& select_path) {
+    if (root->expanded) {
+        root->load_children();
+    }
+   
+    std::vector<Node*> tmp_all;
+    root->flat_list(tmp_all);
+    std::vector<Node*> new_flat(tmp_all.begin() + 1, tmp_all.end());
+    
+    int new_cursor = find_node(new_flat, select_path);
+    if (new_cursor >= 0 && new_cursor < (int)new_flat.size()) {
+        cursor = new_cursor;
+    } else {
+        if (cursor >= (int)new_flat.size()) {
+            cursor = new_flat.empty() ? 0 : new_flat.size() - 1;
+        }
+    }
+    
+    int h, w;
+    getmaxyx(stdscr, h, w);
+    int list_height = h - 2;
+    if (cursor < scroll)
+        scroll = cursor;
+    else if (cursor >= scroll + list_height)
+        scroll = cursor - list_height + 1;
+}
+
+static bool confirm_dialog(const std::string& message) {
+    curs_set(1);
+    
+    int h, w;
+    getmaxyx(stdscr, h, w);
+    
+    int dialog_width = message.length() + 20;
+    int dialog_height = 5;
+    int start_y = (h - dialog_height) / 2;
+    int start_x = (w - dialog_width) / 2;
+    
+    WINDOW* dialog = newwin(dialog_height, dialog_width, start_y, start_x);
+    keypad(dialog, TRUE);
+    box(dialog, 0, 0);
+    
+    mvwprintw(dialog, 1, 2, "%s", message.c_str());
+    
+    const char* buttons[] = {" Yes ", " No "};
+    int selected = 1;
+    int button_x = (dialog_width - 12) / 2;
+    
+    mvwprintw(dialog, 3, button_x, " No ");
+    mvwprintw(dialog, 3, button_x + 6, " Yes ");
+    
+    if (selected == 0) {
+        wattron(dialog, A_REVERSE);
+        mvwprintw(dialog, 3, button_x + 6, " Yes ");
+        wattroff(dialog, A_REVERSE);
+    } else {
+        wattron(dialog, A_REVERSE);
+        mvwprintw(dialog, 3, button_x, " No ");
+        wattroff(dialog, A_REVERSE);
+    }
+    
+    wrefresh(dialog);
+    
+    int key;
+    while (true) {
+        key = wgetch(dialog);
+        
+        if (key == KEY_LEFT || key == KEY_RIGHT) {
+            selected = !selected;
+            
+            mvwprintw(dialog, 3, button_x, " No ");
+            mvwprintw(dialog, 3, button_x + 6, " Yes ");
+            
+            if (selected == 0) {
+                wattron(dialog, A_REVERSE);
+                mvwprintw(dialog, 3, button_x + 6, " Yes ");
+                wattroff(dialog, A_REVERSE);
+            } else {
+                wattron(dialog, A_REVERSE);
+                mvwprintw(dialog, 3, button_x, " No ");
+                wattroff(dialog, A_REVERSE);
+            }
+            wrefresh(dialog);
+            
+        } else if (key == '\n' || key == KEY_ENTER) {
+            delwin(dialog);
+            curs_set(0);
+            refresh();
+            return (selected == 0);
+            
+        } else if (key == 27 || key == 'q' || key == 'n' || key == 'N') {
+            delwin(dialog);
+            curs_set(0);
+            refresh();
+            return false;
+        }
+    }
+}
+
+static bool delete_item(Node* current_node) {
+    try {
+        if (current_node->is_dir) {
+            return fs::remove_all(current_node->path) > 0;
+        } else {
+            return fs::remove(current_node->path);
+        }
+    } catch (const std::exception& e) {
+        return false;
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -383,6 +517,36 @@ int main(int argc, char* argv[]) {
             std::string foldername = get_input("Enter folder name");
             if (!foldername.empty()) {
                 if (create_item(current_node, false, foldername)) {
+                    refresh_tree(root_owner, root, cursor, scroll);
+                }
+            }
+        } else if (key == 'r') {
+            if (display_flat.empty()) continue;
+            Node* current_node = display_flat[cursor];
+            
+            std::string old_name = current_node->name;
+            std::string prompt = "Rename '" + old_name + "' to";
+            std::string new_name = get_input(prompt);
+            
+            if (!new_name.empty() && new_name != old_name) {
+                fs::path old_path = current_node->path;
+                fs::path new_path = old_path.parent_path() / new_name;
+                
+                if (rename_item(current_node, new_name)) {
+                    current_node->path = new_path.string();
+                    current_node->name = new_name;
+                    
+                    refresh_tree_and_select(root_owner, root, cursor, scroll, new_path.string());
+                }
+            }
+       }else if (key == KEY_DC || key == 127) {
+            if (display_flat.empty()) continue;
+            Node* current_node = display_flat[cursor];
+            
+            std::string message = "Delete '" + current_node->name + "'?";
+            if (confirm_dialog(message)) {
+                std::string deleted_path = current_node->path;
+                if (delete_item(current_node)) {
                     refresh_tree(root_owner, root, cursor, scroll);
                 }
             }
