@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 #include <ncurses.h>
+#include <fstream>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -111,8 +113,7 @@ static void render_tree(const std::vector<Node*>& flat,
     getmaxyx(stdscr, h, w);
     erase();
 
-    std::string header = " " + root_name +
-        "  [up/dn jk] move  [Enter/Space] expand/open  [q] quit ";
+    std::string header = " " + root_name + "  [up/dn jk] move  [Enter/Space] expand/open  [n] new file  [N] new folder  [q] quit ";
     header = trunc(header, w - 1);
     header = ljust(header, w - 1);
     attron(COLOR_PAIR(3) | A_BOLD);
@@ -170,6 +171,87 @@ static void open_in_vim(const std::string& path) {
     reset_prog_mode();
     refresh();
     doupdate();
+}
+
+static std::string get_input(const std::string& prompt) {
+    echo();
+    curs_set(1);
+
+    int h, w;
+    getmaxyx(stdscr, h, w);
+    std::string input;
+
+    WINDOW* input_win = newwin(3, w - 2, h - 4, 1);
+    box(input_win, 0, 0);
+    mvwprintw(input_win, 1, 2, "%s: ", prompt.c_str());
+    wrefresh(input_win);
+
+    char buf[256] = {0};
+    mvwgetnstr(input_win, 1, prompt.length() + 4, buf, 255);
+    input = buf;
+
+    delwin(input_win);
+    noecho();
+    curs_set(0);
+    refresh();
+
+    return input;
+}
+
+static bool create_item(Node* current_node, bool is_file, const std::string& name) {
+    if (name.empty()) return false;
+
+    fs::path target_dir;
+
+    if (current_node->is_dir) {
+        target_dir = current_node->path;
+    } else {
+        if (current_node->parent) {
+            target_dir = current_node->parent->path;
+        } else {
+            target_dir = fs::path(current_node->path).parent_path();
+        }
+    }
+
+    fs::path new_path = target_dir / name;
+
+    try {
+        if (is_file) {
+            std::ofstream file(new_path);
+            if (file) {
+                file.close();
+                return true;
+            }
+        } else {
+            return fs::create_directory(new_path);
+        }
+    } catch (const std::exception& e) {
+        return false;
+    }
+    return false;
+}
+
+static void refresh_tree(std::unique_ptr<Node>& root_owner, Node* root,
+                         int& cursor, int& scroll) {
+    if (root->expanded) {
+        root->load_children();
+    }
+
+    std::vector<Node*> tmp_all;
+    root->flat_list(tmp_all);
+    std::vector<Node*> new_flat(tmp_all.begin() + 1, tmp_all.end());
+
+    if (cursor >= (int)new_flat.size()) {
+        cursor = new_flat.empty() ? 0 : new_flat.size() - 1;
+    }
+
+    int h, w;
+    getmaxyx(stdscr, h, w);
+    int list_height = h - 2;
+    if (cursor < scroll)
+        scroll = cursor;
+    else if (cursor >= scroll + list_height)
+        scroll = cursor - list_height + 1;
 }
 
 int main(int argc, char* argv[]) {
@@ -283,6 +365,26 @@ int main(int argc, char* argv[]) {
                 root->flat_list(tmp_all);
                 std::vector<Node*> new_flat(tmp_all.begin() + 1, tmp_all.end());
                 cursor = find_node(new_flat, node->path);
+            }
+        } else if (key == 'n') {
+            if (display_flat.empty()) continue;
+            Node* current_node = display_flat[cursor];
+            
+            std::string filename = get_input("Enter file name");
+            if (!filename.empty()) {
+                if (create_item(current_node, true, filename)) {
+                    refresh_tree(root_owner, root, cursor, scroll);
+                }
+            }
+        } else if (key == 'N') {
+            if (display_flat.empty()) continue;
+            Node* current_node = display_flat[cursor];
+            
+            std::string foldername = get_input("Enter folder name");
+            if (!foldername.empty()) {
+                if (create_item(current_node, false, foldername)) {
+                    refresh_tree(root_owner, root, cursor, scroll);
+                }
             }
         }
     }
