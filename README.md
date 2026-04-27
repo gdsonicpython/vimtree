@@ -2,11 +2,11 @@
 A small program for editing files with vim in a tree
 
 # Building
-[Linux](https://github.com/gdsonicpython/vimtree/edit/main/README.md#linux)
+[Linux](https://github.com/gdsonicpython/vimtree/main/README.md#linux)
 
-[Windows](https://github.com/gdsonicpython/vimtree/edit/main/README.md#windows)
+[Windows](https://github.com/gdsonicpython/vimtree/main/README.md#windows)
 
-[MacOS](https://github.com/gdsonicpython/vimtree/edit/main/README.md#macos) (To be finished by someone that actually has a Mac)
+[MacOS](https://github.com/gdsonicpython/vimtree/main/README.md#macos) (To be finished by someone that actually has a Mac)
 
 ## Linux
 ``` bash
