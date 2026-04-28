@@ -4,7 +4,7 @@ A small program for editing files with vim in a tree
 # Building
 [Linux](https://github.com/gdsonicpython/vimtree#linux)
 
-[Windows](https://github.com/gdsonicpython/vimtree#windows)
+[Windows](https://github.com/gdsonicpython/vimtree#windows) (semi-supported)
 
 [MacOS](https://github.com/gdsonicpython/vimtree#macos) (To be finished by someone that actually has a Mac)
 
